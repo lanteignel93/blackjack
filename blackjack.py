@@ -1,6 +1,12 @@
 import numpy as np
 import random
 import time
+import matplotlib.pyplot as plt
+import sys
+import warnings
+
+if not sys.warnoptions:
+     warnings.simplefilter("ignore")
 
 class Blackjack:
     def __init__(self):
@@ -136,10 +142,10 @@ class Blackjack:
             while dealer['cards'] < 17:
                 new_hand = self.hit('dealer hit',dealer)
                 dealer = new_hand
-            if dealer_hand['cards'] > 21 or dealer_hand['cards'] < hand['cards']:
+            if dealer['cards'] > 21 or dealer['cards'] < hand['cards']:
                 return (1, 'Game Over')
 
-            elif dealer_hand['cards'] == hand['cards']:
+            elif dealer['cards'] == player['cards']:
                 return (0, 'Game Over')
 
             else:
@@ -154,96 +160,16 @@ class Blackjack:
             else:
                 return (player, 'Continue')
 
-    def play_game(self, policy):
-        curr_env = self.deal()
-        player_hand = curr_env['player hand']
-        natural = curr_env['natural']
-        dealer_hidden_card = curr_env['dealer_hidden']
-        dealer_show_card = curr_env['dealer_show']
-        dealer_sum_card = dealer_hidden_card + dealer_show_card
 
-        game_state = {'Player Hand': player_hand,
-                      'Dealer Hand': dealer_show_card,
-                      'Outcome': None}
-
-        policy_state = player_hand
-
-        policy_state['dealer_card'] = dealer_show_card
-
-        if natural:
-            if dealer_sum_card < 21:
-                game_state['Outcome'] = 1.5
-            else:
-                game_State['Outcome'] = 0
-
-            return game_state
-
-        else:
-            if dealer_sum_card == 21:
-                game_state['Outcome'] = -1
-                return game_state
-            else:
-                dealer_state = {'cards': dealer_sum_card,
-                                'usable_ace': False}
-            action = policy(policy_state)
-            game_status = 'Continue'
-
-            outcome = self.play_hand(player_hand, action, dealer_state)
-
-            if outcome[1] == 'Game Over':
-                game_state['Outcome'] = outcome[0]
-                return game_state
-            else:
-                player_hand = outcome[0]
-                game_status = 'Continue'
-
-                while game_status == 'Continue':
-                    action = policy(policy_state)
-                    outcome = self.play_hand(player_hand, action, dealer_state)
-                    if type(outcome[0]) == int:
-                        game_status = outcome[1]
-                        break
-                    player_hand, usable_ace_state = outcome[0]['cards'], outcome[1]['usable_ace']
-                    policy_state['cards'] = player_cards
-                    policy_state['usable_ace'] = usable_ace_state
-                    game_status = outcome[1]
-
-            game_outcome = outcome[0]
-            game_state['Outcome'] = game_outcome
-
-        return game_state
-
-
-    def stupid_policy(self, state):
-        if state['cards'] < 20:
-            return 'hit'
-        else:
-            return 'stand'
-
-    def monte_carlo_sim(self, iter, policy):
-        for _ in range(iter):
-            game_outcome = self.play_game(policy)
-            player = game_outcome['Player Hand']
-            dealer = game_outcome['Dealer Hand']
-            outcome = game_outcome['Outcome']
-            self.get_rewards()[(player['cards'], player['usable_ace'], dealer)]['reward'] += outcome
-            self.get_rewards()[(player['cards'], player['usable_ace'], dealer)]['count'] += 1
-
-        return None
-
-
-    def policy_valuation(self, state, rewards):
+    def policy_valuation(self, state, rewards, implied_prob = False):
         (count,total_reward) = rewards[state]['count'], rewards[state]['reward']
         if count == 0:
             return 0
         else:
-            return total_reward/count
-
-    def print_policy_val(self, rewards):
-        for s in self.get_states():
-            tmp = [v for k,v in s.items()]
-            print(s, self.policy_valuation(tuple(tmp), rewards))
-
+            if not implied_prob:
+                return total_reward/count
+            else:
+                return(count+total_reward)/(2*count)
 
     def print_q_policy_val(self):
         for k,v in self.get_q_rewards().items():
@@ -313,7 +239,7 @@ class Blackjack:
         pol = {}
         for s in self.get_states():
             tmp = [v for k,v in s.items()]
-            pol[tuple(tmp)] = self.stupid_policy(s)
+            pol[tuple(tmp)] = np.random.choice(self.get_action())
         self.policy = pol
 
 
@@ -347,7 +273,7 @@ class Blackjack:
 
         return None
 
-    def optimal_policy(self):
+    def optimal_policy(self, implied_prob = False):
         opt = {}
         for s in self.get_states():
             player = s['cards']
@@ -358,12 +284,11 @@ class Blackjack:
             action_val = {}
             for a in self.get_action():
                 top_action = None
-                Q_val = self.policy_valuation((key,a),self.get_q_rewards())
-                action_val[a] = Q_val
+                val = self.policy_valuation((key,a),self.get_q_rewards(), implied_prob)
+                action_val[a] = val
 
             curr_max = -np.inf
             for k, v in action_val.items():
-                print(k,v)
                 if v > curr_max:
                     curr_max = v
                     top_action = k
@@ -372,15 +297,42 @@ class Blackjack:
         return opt
 
 
-game = Blackjack()
-game.init_states()
-game.init_rewards()
-game.init_policy()
-#game.monte_carlo_sim(5e5, game.stupid_policy)
-#game.print_policy_val(game.get_rewards())
-game.init_q_rewards()
-game.monte_carlo_q_sim(int(1e7))
-#game.get_q_rewards()
-#game.print_q_policy_val()
-game.optimal_policy()
-#game.get_q_rewards()
+    def plot_optimal_policy(self, is_ace = False):
+
+        opt = self.optimal_policy(implied_prob = True)
+
+        fig = plt.figure(figsize=(12,12))
+        ax = fig.add_subplot(111)
+        data = np.empty((10,10)) * np.nan
+        cax = ax.matshow(data, cmap = 'binary')
+        is_ace = False
+        for j in range(10):
+            for i in range(10):
+                state_val = opt[(i+12,is_ace,j+2)]
+                action, prob = state_val[0], state_val[1]
+                prob = '{:.2f}%'.format(100*prob)
+                if action == 'hit':
+                    c = 'firebrick'
+                else:
+                    c = 'forestgreen'
+                ax.fill_between([i,i+1], j, j+1, facecolor=c)
+                ax.text(i+0.5, j+0.5, prob, color='black', ha='center', va='center', fontsize = 12,
+                    bbox=dict(boxstyle='round', facecolor='white', edgecolor='black'))
+
+        extent = (0,10,10,0)
+        ax.set_xticks(np.arange(0,10,1))
+        ax.set_yticks(np.arange(0,10,1))
+        ax.set_xticklabels(np.arange(12,22,1), fontsize = 12)
+        ax.set_yticklabels(np.arange(2,12,1), fontsize = 12)
+        ax.set_xlabel("Players Card", fontsize = 16)
+        ax.xaxis.set_label_position('top')
+        ax.set_ylabel("Dealer's Cards", fontsize = 16)
+        ax.grid(which = 'major', color='k',lw=2)
+        ax.imshow(data, extent=extent)
+        plt.show()
+
+    def init_game(self):
+        self.init_states()
+        self.init_rewards()
+        self.init_policy()
+        self.init_q_rewards()
