@@ -1,4 +1,4 @@
-# Windy Gridworld
+# Black Jack
 
 This code explores how to optimize the game of Blackjack via the Q-Learning algorithm
 ## Motivation
